@@ -134,21 +134,20 @@ func (m MemoryResultStore) RequestAnalysisStatus( //nolint
 	scanID string,
 	buildFn func() (bool, error),
 ) VulnerabilityResult {
-	existing, ok := m.PopResult(scanID)
+	existing, _ := m.PopResult(scanID)
 
-	if !ok {
+	if existing.ScanCreated {
 		// Result not found so begin the async fetch
 		go func() {
 			complete, err := buildFn()
 			if err != nil {
 				log.Debugf("error checking analysis state for %v: %v", scanID, err)
-				// Set IsComplete to true to remove the scan from the store if the create scan fails so that it can be retried without using the cache.
 				resultChannel <- VulnerabilityResult{
 					ScanID:                scanID,
 					ScanCreated:           true,
 					AnalysisComplete:      false,
 					ReportBuildInProgress: false,
-					IsComplete:            true,
+					IsComplete:            false,
 					Result:                nil,
 					Error:                 err,
 				}
@@ -277,7 +276,7 @@ func (m MemoryResultStore) RequestRawResult(
 func (m MemoryResultStore) resultRetriever() {
 	for {
 		report := <-resultChannel
-		log.WithFields(log.Fields{"scanId": report.ScanID, "imageAdded": report.ScanCreated, "isComplete": report.IsComplete, "reportError": report.Error}).
+		log.WithFields(log.Fields{"scanId": report.ScanID, "imageAdded": report.ScanCreated, "analysisComplete": report.AnalysisComplete, "isComplete": report.IsComplete, "reportError": report.Error}).
 			Debug("scan result added to result store")
 		m.Results[report.ScanID] = report
 	}

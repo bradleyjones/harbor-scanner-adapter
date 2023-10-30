@@ -20,6 +20,12 @@ import (
 	"github.com/anchore/harbor-scanner-adapter/pkg/model/anchore"
 )
 
+type CustomClientError string
+
+func (e CustomClientError) Error() string {
+	return string(e)
+}
+
 const (
 	CHUNKSIZE                               = 100
 	NVDFEEDGROUP                            = "nvdv2:cves"
@@ -32,6 +38,7 @@ const (
 	RegistryCredentialUpdateURLTemplate     = "/registries/%s" // #nosec G101
 	FeedsURL                                = "/system/feeds"
 	VersionURL                              = "/version"
+	ErrImageNotFound                        = CustomClientError("image not found in anchore")
 )
 
 var apiVersion = "v2" // Defaults to v2 but will switch to v1 if v2 API is not supported
@@ -337,6 +344,9 @@ func GetImageVulnerabilities(
 		}
 		return imageVulnerabilityReport, nil
 	}
+	if resp.StatusCode == 404 {
+		return imageVulnerabilityReport, ErrImageNotFound
+	}
 	return imageVulnerabilityReport, fmt.Errorf("error response from anchore api")
 }
 
@@ -353,10 +363,15 @@ func GetImage(clientConfiguration *Config, digest string) (anchore.Image, error)
 
 	log.WithFields(log.Fields{"method": "get", "url": reqURL}).Debug("sending request to anchore api")
 	// call API get the full report until "analysis_status" = "analyzed"
-	_, body, errs := sendRequest(clientConfiguration, request.Get(reqURL))
+	resp, body, errs := sendRequest(clientConfiguration, request.Get(reqURL))
 	if errs != nil {
 		log.Errorf("could not contact anchore api")
 		return image, errs[0]
+	}
+
+	// 404 response is expected if the image is not yet added to anchore
+	if resp.StatusCode == 404 {
+		return image, ErrImageNotFound
 	}
 
 	if apiVersion == "v1" {

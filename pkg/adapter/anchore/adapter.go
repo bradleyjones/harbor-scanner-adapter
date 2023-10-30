@@ -275,10 +275,10 @@ func (s *HarborScannerAdapter) GetHarborVulnerabilityReport(
 
 	if !result.AnalysisComplete {
 		log.WithFields(log.Fields{"scanId": scanID}).Debug("checking image analysis state in Anchore Enterprise")
-		imageAnalsisFn := func() (bool, error) {
+		imageAnalysisFn := func() (bool, error) {
 			return IsImageAnalysed(imageDigest, scanID, &s.Configuration.AnchoreClientConfig)
 		}
-		resultStore.RequestAnalysisStatus(scanID, imageAnalsisFn)
+		resultStore.RequestAnalysisStatus(scanID, imageAnalysisFn)
 	}
 
 	if result.ReportBuildInProgress {
@@ -353,6 +353,10 @@ func IsImageAnalysed(imageDigest, scanID string, clientConfig *client.Config) (b
 		log.WithFields(log.Fields{"scanId": scanID, "imageState": imageState, "imageDigest": imageDigest}).
 			Debug("analysis pending")
 		return false, fmt.Errorf("analysis pending")
+	case NotFound:
+		log.WithFields(log.Fields{"scanId": scanID, "imageState": imageState, "imageDigest": imageDigest}).
+			Debug("image not found")
+		return false, fmt.Errorf("analysis pending")
 	default:
 		log.WithFields(log.Fields{"scanId": scanID, "imageState": imageState, "imageDigest": imageDigest}).
 			Debug("analysis incomplete but unknown state")
@@ -371,6 +375,10 @@ func GetImageState(imageDigest string, clientConfig *client.Config) (ImageState,
 
 	img, err := client.GetImage(clientConfig, imageDigest)
 	if err != nil {
+		if errors.Is(err, client.ErrImageNotFound) {
+			log.WithField("imageDigest", imageDigest).Debug("image not found in Anchore")
+			return NotFound, nil
+		}
 		return NotFound, err
 	}
 
@@ -409,6 +417,11 @@ func BuildHarborVulnerabilityReport(
 	start := time.Now()
 	anchoreVulnResponse, err := GetAnchoreVulnReport(imageDigest, clientConfig, filterVendorIgnoredVulns)
 	if err != nil {
+		if errors.Is(err, client.ErrImageNotFound) {
+			log.WithField("imageDigest", imageDigest).Debug("image not found in Anchore")
+			return harbor.VulnerabilityReport{}, fmt.Errorf("analysis pending")
+		}
+
 		log.WithFields(log.Fields{"repository": imageRepository, "imageDigest": imageDigest}).
 			Error("error from vulnerability report api call to Anchore")
 		return harbor.VulnerabilityReport{}, err
@@ -509,10 +522,10 @@ func (s *HarborScannerAdapter) GetRawVulnerabilityReport(scanID string) (harbor.
 
 	if !result.AnalysisComplete {
 		log.WithFields(log.Fields{"scanId": scanID}).Debug("checking image analysis state in Anchore Enterprise")
-		imageAnalsisFn := func() (bool, error) {
+		imageAnalysisFn := func() (bool, error) {
 			return IsImageAnalysed(digest, scanID, &s.Configuration.AnchoreClientConfig)
 		}
-		resultStore.RequestAnalysisStatus(rawScanID, imageAnalsisFn)
+		resultStore.RequestAnalysisStatus(rawScanID, imageAnalysisFn)
 	}
 
 	if result.ReportBuildInProgress {
